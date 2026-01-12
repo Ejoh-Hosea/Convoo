@@ -9,7 +9,14 @@ const ChatContainer = () => {
   useEffect(() => {
     getMessages(selectedUser._id, getMessages);
   }, [selectedUser._id, getMessages]);
-  if (isMessagesLoading) return <div>Loading...</div>;
+  if (isMessagesLoading)
+    return (
+      <div className="flex-1 flex flex-col overflow-auto">
+        <ChatHeader />
+        <MessageSkeleton />
+        <MessageInput />
+      </div>
+    );
   return (
     <div className="flex-1 flex flex-fol overflow-auto">
       <ChatHeader />
