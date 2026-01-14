@@ -28,11 +28,12 @@ if (process.env.NODE_ENV === "production") {
   // serve static files
   app.use(express.static(path.join(__dirname, "../frontend/dist")));
 
-  // catch all other routes
-  app.all("/*", (req, res) => {
+  // catch all other requests using regex
+  app.get(/.*/, (req, res) => {
     res.sendFile(path.join(__dirname, "../frontend/dist", "index.html"));
   });
 }
+
 server.listen(PORT, () => {
   console.log("server is running on port" + PORT);
   connectDB();
