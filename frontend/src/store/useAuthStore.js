@@ -29,12 +29,15 @@ export const useAuthStore = create((set, get) => ({
     set({ isSigningUp: true });
     try {
       const res = await axiosInstance.post("/auth/signup", data);
-      set({ authUser: res.data });
-
-      toast.success("Account created successfully");
-      get().connectSocket();
+      // Store the email in localStorage for the verify email page
+      localStorage.setItem("pendingEmail", data.email);
+      toast.success("Verification email sent! Check your inbox.");
+      // Don't set authUser here - user is not verified yet
+      // The signup response contains the message, not user data
+      return { success: true, email: data.email };
     } catch (error) {
       toast.error(error.response.data.message);
+      return { success: false };
     } finally {
       set({ isSigningUp: false });
     }

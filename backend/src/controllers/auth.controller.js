@@ -1,7 +1,10 @@
 import cloudinary from "../lib/cloudinary.js";
 import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
+import PendingUser from "../models/pendingUser.model.js";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
+import { sendVerificationEmail } from "../lib/transporter.js";
 export const signup = async (req, res) => {
   const { fullName, email, password } = req.body;
   try {
@@ -13,28 +16,56 @@ export const signup = async (req, res) => {
         .status(400)
         .json({ message: "password must be at least 6 characters" });
     }
-    const user = await User.findOne({ email });
-    if (user) return res.status(400).json({ message: "Email already exists" });
-    //hash password
+
+    // Check if email already exists in verified users
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "Email already exists" });
+    }
+
+    // Check if email already has a pending verification
+    const existingPendingUser = await PendingUser.findOne({ email });
+    if (existingPendingUser) {
+      // Delete old pending user and create new one
+      await PendingUser.deleteOne({ email });
+    }
+
+    // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-    const newUser = new User({
+
+    // Generate verification token
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+    const tokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    // Create pending user
+    const pendingUser = new PendingUser({
       fullName,
       email,
       password: hashedPassword,
+      verificationToken,
+      tokenExpiry,
     });
-    if (newUser) {
-      //generate jwt token here
-      generateToken(newUser._id, res);
-      await newUser.save();
-      res.status(201).json({
-        _id: newUser._id,
-        fullName: newUser.fullName,
-        email: newUser.email,
-        profilePic: newUser.profilePic,
+
+    await pendingUser.save();
+
+    // Send verification email
+    try {
+      await sendVerificationEmail(email, fullName, verificationToken);
+      res.status(200).json({
+        message:
+          "Verification email sent. Please check your inbox to verify your account.",
+        email: email,
       });
-    } else {
-      res.status(400).json({ message: "All fields are required" });
+    } catch (emailError) {
+      // If email fails, delete the pending user
+      await PendingUser.deleteOne({ email });
+      console.log("Error sending verification email:", emailError);
+      res
+        .status(500)
+        .json({
+          message: "Failed to send verification email. Please try again.",
+        });
     }
   } catch (error) {
     console.log("Error in signup controller", error.message);
@@ -98,5 +129,100 @@ export const checkAuth = (req, res) => {
   } catch (error) {
     console.log("Error in checkAuth controller", error.message);
     res.status(500).json({ message: "internal Server Error" });
+  }
+};
+
+export const verifyEmail = async (req, res) => {
+  const { token } = req.query;
+
+  try {
+    if (!token) {
+      return res
+        .status(400)
+        .json({ message: "Verification token is required" });
+    }
+
+    // Find pending user with this token
+    const pendingUser = await PendingUser.findOne({
+      verificationToken: token,
+      tokenExpiry: { $gt: Date.now() }, // Check if token is not expired
+    });
+
+    if (!pendingUser) {
+      return res.status(400).json({
+        message: "Invalid or expired verification token. Please sign up again.",
+      });
+    }
+
+    // Create verified user
+    const newUser = new User({
+      fullName: pendingUser.fullName,
+      email: pendingUser.email,
+      password: pendingUser.password,
+      profilePic: "",
+    });
+
+    await newUser.save();
+
+    // Delete pending user
+    await PendingUser.deleteOne({ _id: pendingUser._id });
+
+    // Generate JWT token
+    generateToken(newUser._id, res);
+
+    res.status(201).json({
+      _id: newUser._id,
+      fullName: newUser.fullName,
+      email: newUser.email,
+      profilePic: newUser.profilePic,
+      message: "Email verified successfully!",
+    });
+  } catch (error) {
+    console.log("Error in verifyEmail controller", error.message);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const resendVerificationEmail = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    // Check if user is already verified
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "Email is already verified" });
+    }
+
+    // Find pending user
+    const pendingUser = await PendingUser.findOne({ email });
+    if (!pendingUser) {
+      return res.status(404).json({
+        message:
+          "No pending verification found for this email. Please sign up.",
+      });
+    }
+
+    // Generate new verification token
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+    const tokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    // Update pending user with new token
+    pendingUser.verificationToken = verificationToken;
+    pendingUser.tokenExpiry = tokenExpiry;
+    await pendingUser.save();
+
+    // Send verification email
+    await sendVerificationEmail(email, pendingUser.fullName, verificationToken);
+
+    res.status(200).json({
+      message: "Verification email resent. Please check your inbox.",
+    });
+  } catch (error) {
+    console.log("Error in resendVerificationEmail controller", error.message);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
