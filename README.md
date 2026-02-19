@@ -23,7 +23,7 @@ The application mirrors patterns used in **real‑world SaaS messaging platforms
 
 ---
 
-## Key Highlights (What Matters to Recruiters)
+## Key Highlights 
 
 - **Real‑time messaging** using Socket.io (bi‑directional communication)
 - **JWT authentication + HTTP‑only cookies** (secure & production‑grade)
